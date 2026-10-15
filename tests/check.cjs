@@ -1,0 +1,22 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+class El{constructor(){this.style={};this.children=[];this.dataset={};this.textContent='';this.value='';this.listeners={};this.classes=new Set();this.classList={toggle:(s,force)=>{if(force===undefined)force=!this.classes.has(s);force?this.classes.add(s):this.classes.delete(s)},add:s=>this.classes.add(s),contains:s=>this.classes.has(s)};}set className(v){this.classes=new Set(v.split(' '))}set innerHTML(v){this.html=v}get innerHTML(){return this.html}setAttribute(){}addEventListener(k,f){this.listeners[k]=f}appendChild(e){this.children.push(e)}replaceChildren(){this.children=[]}scrollIntoView(){} }
+const ids=[...fs.readFileSync('docs/index.html','utf8').matchAll(/id="([^"]+)"/g)].map(x=>x[1]),els=Object.fromEntries(ids.map(x=>[x,new El()])),storage={};
+const ctx=vm.createContext({document:{getElementById:id=>{assert(els[id],`Unknown DOM id ${id}`);return els[id]},createElement:()=>new El(),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:k=>storage[k],setItem:(k,v)=>storage[k]=v},window:{scrollTo(){}},alert(){},confirm:()=>true,console,setInterval:()=>1,clearInterval(){},Date,Math});
+for(const f of ['questions.js','engine.js','app.js'])vm.runInContext(fs.readFileSync('docs/'+f,'utf8'),ctx,{filename:f});
+function run(s){return vm.runInContext(s,ctx)}
+assert.equal(run('Q.length'),70);assert.equal(run('new Set(Q.map(q=>q.id)).size'),70);assert(run('Q.every(q=>q.choices.length===5&&Number.isInteger(q.answer)&&q.answer>=0&&q.answer<5&&q.explanation&&q.memory&&q.reference)'));
+assert(run('Q.every(q=>FREQUENCY.topics[q.topic].count>=6)'));
+assert(run('Object.values(FREQUENCY.topics).every(t=>new Set(t.evidence.map(e=>e.period)).size===t.count&&t.rate===t.count*10&&t.evidence.every(e=>e.number>=1&&e.number<=44&&FREQUENCY.sources.some(s=>s.period===e.period)))'));
+assert.equal(run('FREQUENCY.sources.length'),10);
+run("start('normal')");assert.equal(els.choices.children.length,5);assert.equal(run('FREQUENCY.topics[question().topic].count'),10);run('judge()');assert(els.message.textContent.includes('選択肢'));
+els.choices.children[run('question().answer')].listeners.click();els.answerBtn.listeners.click();run('judge()');assert.equal(run('stats[active.ids[0]].a'),1);assert(!els.feedback.classList.contains('hidden'));assert(els.feedback.innerHTML.includes('10回'));
+run('home();launch()');assert(!els.feedback.classList.contains('hidden'));for(let i=1;i<70;i++)run('move(active.pos+1);active.answers[question().id]=question().answer;judge()');run('finish()');assert(els.sumBody.innerHTML.includes('70'));assert.equal(run('active'),null);
+run("start('normal');active.answers[question().id]=(question().answer+1)%5;judge();home();start('wrong')");assert.equal(run('active.ids.length'),1);run('active.answers[question().id]=question().answer;judge();finish()');assert.equal(run("Engine.select('wrong',stats).length"),0);assert.equal(run("Engine.select('weak',stats).length"),1);
+for(const c of run('Engine.categories')){els.catselect.value=c;run("start('category')");assert(run('active.ids.every(id=>Q.find(q=>q.id===id).category===document.getElementById("catselect").value)'))}
+run("start('random')");assert.equal(run('new Set(active.ids).size'),70);
+for(let i=0;i<50;i++){assert.equal(run("Engine.select('mock',{}).length"),44);assert.equal(run("new Set(Engine.select('mock',{}).map(q=>q.id)).size"),44);assert.deepEqual(Array.from(run("((s)=>Engine.categories.map(c=>s.filter(q=>q.category===c).length))(Engine.select('mock',{}))")),[10,10,7,7,10])}
+run("start('mock')");assert(els.answerBtn.classList.contains('hidden'));assert.equal(els.timer.textContent,'03:00:00');run('active.ids.forEach(id=>active.answers[id]=Q.find(q=>q.id===id).answer);finish()');assert(els.sumBody.innerHTML.includes('400 / 400'));assert(els.sumBody.innerHTML.includes('合格基準クリア'));
+assert(!run("Engine.grade(Engine.select('mock',{}),{}).pass"));
+assert(!run("((s)=>{let a={};s.forEach(q=>{if(q.category!==Engine.categories[0])a[q.id]=q.answer});return Engine.grade(s,a).pass})(Engine.select('mock',{}))"));
+run("start('mock');active.started=Date.now()-10800001;tick()");assert.equal(run('active'),null);assert(els.sumBody.innerHTML.includes('合格基準未達'));assert.equal(run('Engine.remaining(0,10800000)'),0);
+console.log('PASS: 70 questions / 37 topics / evidence rates, six modes, ranked order, choices/feedback, duplicate prevention, resume, review filters, 50 mock compositions of 44 with 10/10/7/7/10, 400-point grading, per-range failure, timeout.');
